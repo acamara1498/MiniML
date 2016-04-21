@@ -15,6 +15,7 @@
 %token NEG
 %token PLUS MINUS 
 %token TIMES
+%token DIVIDE
 %token LESSTHAN EQUALS
 %token IF THEN ELSE 
 %token FUNCTION
@@ -45,6 +46,7 @@ expnoapp: INT			{ Num $1 }
 	| exp PLUS exp		{ Binop("+", $1, $3) }
 	| exp MINUS exp		{ Binop("-", $1, $3) }
 	| exp TIMES exp		{ Binop("*", $1, $3) }
+	| exp DIVIDE exp	{ Binop("/", $1, $3) }
 	| exp EQUALS exp	{ Binop("=", $1, $3) }
 	| exp LESSTHAN exp	{ Binop("<", $1, $3) }
 	| NEG exp		{ Unop("~", $2) }
