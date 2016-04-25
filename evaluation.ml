@@ -69,11 +69,49 @@ module Env : Env_type =
    initial implementation, we just convert the expression unchanged to
    a value and return it. *)
 
-  
+let unopeval (op: string) (v1: expr) : expr =
+  match op, v1 with
+  | "~" , Num x -> Num (~- x)
+  | _ , _ -> raise EvalException
+;;
+
+let binopeval (op: string) (v1: expr) (v2: expr) : expr =
+  match op, v1, v2 with
+  | "+", Num x1, Num x2 -> Num (x1 + x2)
+  | "+", _, _ -> raise (EvalError "can't add non-ints")
+  | "*", Num x1, Num x2 -> Num (x1 * x2)
+  | "*", _, _ -> raise (EvalError "can't multiply non-ints")
+  | "-", Num x1, Num x2 -> Num (x1 - x2)
+  | "-", _, _ -> raise (EvalError "can't subtract non-ints")
+  | "/", Num x1, Num x2 ->
+    if x2 != 0 then Num (x1 * x2)
+    else raise (EvalError "can't multiply non-ints")
+  | "/", _, _ -> raise (EvalError "can't divide non-ints")
+  | "=", Num x1, Num x2 -> Bool (x1 = x2)
+  | _, _, _  -> raise (EvalError "can't divide non-ints")
+;;
+
+let rec eval (exp: expr) : expr =
+  match exp with
+  | Num _ | Bool _ -> exp
+  | Raise | Unassigned -> exp
+  | Var x -> raise EvalException
+  | Unop (op, e) -> unopeval op (eval e)
+  | Binop (op, e1, e2) -> binopeval op (eval e1) (eval e2)
+  | Conditional (e1, e2, e3) -> if eval e1 = Bool true then eval e2 else eval e3
+  | Fun (_, _) -> exp
+  | Let (x, def, body) -> eval (subst x (eval def) body)
+  | Letrec (x, def, body) -> eval (subst x (eval def) body)
+  | App (f, q) ->
+    match eval f with
+    | Fun(def, body) -> eval (subst def (eval q) body)
+    | _ -> exp
+;;
+
 let eval_t exp _env = Env.Val exp ;;
-let eval_s _ = failwith "eval_s not implemented" ;;
+let eval_s exp _env = Env.Val (eval exp) ;;
 let eval_d _ = failwith "eval_d not implemented" ;;
 let eval_l _ = failwith "eval_l not implemented" ;;
 
-let evaluate = eval_t ;;
+let evaluate = eval_s ;;
 
