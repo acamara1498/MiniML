@@ -55,14 +55,13 @@ let rec free_vars (exp : expr) : varidset =
     gensym. Assumes no variable names use the prefix "var". *)
 let counter = ref ~-1 ;;
 let new_varname () : varid =
-    "newvar_" ^ string_of_int (counter := !counter + 1; !counter) ;;
+    "var" ^ string_of_int (counter := !counter + 1; !counter) ;;
 
 (** Substitute [repl] for free occurrences of [var_name] in [exp] *)
 let rec subst (var_name: varid) (repl: expr) (exp: expr) : expr =
   let rec sub (exp: expr) : expr =
     match exp with
-    | Num _ -> exp
-    | Bool _ -> exp
+    | Num _ | Bool _ | Raise | Unassigned -> exp
     | Var x -> if x = var_name then repl else exp
     | Unop (op, e) -> Unop (op, sub e)
     | Binop (op, e1, e2) -> Binop (op, sub e1, sub e2)
@@ -73,7 +72,7 @@ let rec subst (var_name: varid) (repl: expr) (exp: expr) : expr =
           if SS.mem y (free_vars repl)
           then
             let z = new_varname () in
-            Fun(z, Fun(y, subst z body repl))
+            Fun(z, Fun(y, sub (subst y (Var z) body)))
           else
             Fun(y, sub body)
     | Let (y, def, body) ->
@@ -84,7 +83,6 @@ let rec subst (var_name: varid) (repl: expr) (exp: expr) : expr =
         if y = var_name
         then Letrec (y, def, body)
         else Letrec (y, sub def, sub body)
-    | Raise | Unassigned -> exp
     | App (e1, e2) -> App (sub e1, sub e2) in
     sub exp
 ;;
@@ -110,3 +108,4 @@ let rec exp_to_string (exp: expr) : string =
   	| Unassigned -> "Unassigned"
   	| App (e1, e2) -> "App(" ^ (exp_to_string e1) ^ ", " ^ (
   	                            exp_to_string e2) ^ ")"
+;;

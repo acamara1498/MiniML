@@ -21,6 +21,7 @@ module type Env_type = sig
     val close : expr -> env -> value
     val lookup : env -> varid -> value
     val extend : env -> varid -> value ref -> env
+    val update : env -> varid -> value ref -> env
     val env_to_string : env -> string
     val value_to_string : ?printenvp:bool -> value -> string
   end
@@ -51,6 +52,16 @@ module Env : Env_type =
        variable varid to loc *)
     let extend (env: env) (varname: varid) (loc: value ref) : env =
       (varname, loc) :: env ;;
+
+    (* update variable's value *)
+    let rec update (env: env) (varname: varid) (loc: value ref) : env =
+      match env with
+      | [] -> []
+      | (id, v) :: tl ->
+        if id = varname
+        then ((id, loc) :: tl)
+        else ((id, v) :: (update tl varname loc))
+     ;;
 
     (* Returns a printable string representation of an environment *)
     let rec env_to_string (env: env) : string =
@@ -125,16 +136,16 @@ let rec evald exp env =
   | Num _ | Bool _ | Fun (_, _) | Raise | Unassigned -> (Env.Val exp)
   | Var x -> Env.lookup env x
   | Unop (op, e) -> (match evald e env with
-		 | Env.Val p -> Env.Val (unopeval op p)
-         | _ -> raise EvalException)
+	| Env.Val p -> Env.Val (unopeval op p)
+    | _ -> raise EvalException)
   | Binop (op, e1, e2) -> (match (evald e1 env, evald e2 env) with
-         | Env.Val p1, Env.Val p2 -> Env.Val (binopeval op p1 p2)
-         | _ -> raise EvalException)
+    | Env.Val p1, Env.Val p2 -> Env.Val (binopeval op p1 p2)
+    | _ -> raise EvalException)
   | Conditional(e1, e2, e3) -> (match evald e1 env with
-         | Env.Val (Bool b) -> (match b with
-                       | true -> evald e2 env
-                       | false -> evald e3 env)
-         | _ -> raise EvalException)
+    | Env.Val (Bool b) -> (match b with
+                           | true -> evald e2 env
+                           | false -> evald e3 env)
+    | _ -> raise EvalException)
   | Let(x, def, body) ->
     (match evald def env with
      | Env.Val p -> let env' = Env.extend env x (ref (Env.Val p)) in
@@ -145,20 +156,68 @@ let rec evald exp env =
     (match evald def env' with
     | Env.Val Unassigned -> raise EvalException
     | Env.Val p -> let env'' = Env.extend env' x (ref (Env.Val p)) in
-                   evald body env''
+                               evald body env''
     | Env.Closure _ -> raise EvalException)
   | App(e1, e2) -> (match evald e1 env with
     | Env.Val (Fun (s, e1')) -> (match evald e2 env with
-         | Env.Val v -> let env' = Env.extend env s (ref (Env.Val v)) in
-                  evald e1' env'
-         | Env.Closure _ -> raise (EvalError "only functions can be applied"))
+      | Env.Val v -> let env' = Env.extend env s (ref (Env.Val v)) in
+                                evald e1' env'
+      | Env.Closure _ -> raise (EvalError "closures aren't supported"))
     | _ -> raise  (EvalError "only functions can be applied"))
+;;
+
+(* part 5 extension: evaluate with lexical scoping *)
+let rec eval_lex exp env =
+  match exp with
+  | Num _ | Bool _ | Raise | Unassigned -> (Env.Val exp)
+  | Var x -> Env.lookup env x
+  | Unop (op, e) -> (match eval_lex e env with
+	| Env.Val p -> Env.Val (unopeval op p)
+    | _ -> raise EvalException)
+  | Binop (op, e1, e2) -> (match (eval_lex e1 env, eval_lex e2 env) with
+    | Env.Val p1, Env.Val p2 -> Env.Val (binopeval op p1 p2)
+    | _ -> raise EvalException)
+  | Conditional(e1, e2, e3) -> (match eval_lex e1 env with
+    | Env.Val (Bool b) -> (match b with
+                           | true -> eval_lex e2 env
+                           | false -> eval_lex e3 env)
+    | _ -> raise EvalException)
+  | Fun (s, e) -> (Env.Closure (exp, env))
+  | Let(x, def, body) -> (match eval_lex def env with
+    | Env.Val p -> let env' = Env.extend env x (ref (Env.Val p)) in
+                              eval_lex body env'
+	| Env.Closure (e, b) ->
+	  let env' = Env.extend env x (ref (Env.Closure (e, b))) in
+	  eval_lex body env')
+  | Letrec(x, def, body) ->
+    let env' = Env.extend env x (ref (Env.Val Unassigned)) in
+    (match eval_lex def env' with
+    | Env.Val Unassigned -> raise EvalException
+    | Env.Val p -> let env'' = Env.extend env' x (ref (Env.Val p)) in
+                               eval_lex body env''
+    | Env.Closure (e, b) ->
+      let b' = Env.update b x (ref (Env.Val e)) in
+      let env'' = Env.update env' x (ref (Env.Closure (e, b'))) in
+                  eval_lex body env'')
+  | App(e1, e2) -> (match eval_lex e1 env with
+    | Env.Val (Fun (x, q)) ->
+      (match eval_lex e2 env with
+      | Env.Val p as v -> let env' = Env.extend env x (ref v) in eval_lex q env'
+      | Env.Closure p as v -> let env' = Env.extend env x (ref v) in
+                                         eval_lex q env')
+    | Env.Closure (Fun (x, q), env') ->
+      (match eval_lex e2 env with
+      | Env.Val p -> let env'' = Env.extend env' x (ref (Env.Val p)) in
+                     eval_lex q env''
+      | Env.Closure p -> let env'' = Env.extend env' x (ref (Env.Closure p)) in
+                                     eval_lex q env'')
+	| _ -> raise (EvalError "only functions can be applied"))
 ;;
 
 let eval_t exp _env = Env.Val exp ;;
 let eval_s exp _env = Env.Val (eval exp) ;;
 let eval_d exp env = evald exp env ;;
-let eval_l _ = failwith "eval_l not implemented" ;;
+let eval_l exp env = eval_lex exp env ;;
 
-let evaluate = eval_d ;;
+let evaluate = eval_s ;;
 
