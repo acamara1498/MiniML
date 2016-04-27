@@ -40,27 +40,37 @@ module Env : Env_type =
 
     (* Creates a closure from an expression and the environment it's
        defined in *)
-    let close (exp: expr) (env: env) : value =
-      failwith "close not implemented" ;;
+    let close (exp: expr) (env: env) : value = Closure (exp, env) ;;
 
     (* Looks up the value of a variable in the environment *)
     let lookup (env: env) (varname: varid) : value =
-      failwith "lookup not implemented" ;;
+      try !(List.assoc varname env) with Not_found -> raise EnvUnbound
+    ;;
 
     (* Returns a new environment just like env except that it maps the
        variable varid to loc *)
     let extend (env: env) (varname: varid) (loc: value ref) : env =
-      failwith "extend not implemented" ;;
+      (varname, loc) :: env ;;
 
     (* Returns a printable string representation of an environment *)
-    let env_to_string (env: env) : string =
-      failwith "env_to_string not implemented" ;;
+    let rec env_to_string (env: env) : string =
+      let rec aux e =
+	    match e with
+        | [] -> "\n"
+        | (id, v) :: tl -> id ^ (value_to_string !v) ^ (aux tl) in
+      aux env
 
     (* Returns a printable string representation of a value; the flag
        printenvp determines whether to include the environment in the
        string representation when called on a closure *)
-    let value_to_string ?(printenvp : bool = true) (v: value) : string =
-      failwith "value_to_string not implemented" ;;
+    and value_to_string ?(printenvp : bool = true) (v: value) : string =
+      match v with
+      | Val exp -> exp_to_string exp
+      | Closure (exp, env) ->
+          if printenvp
+          then exp_to_string exp ^ " : " ^ (env_to_string env)
+          else exp_to_string exp
+    ;;
   end
 ;;
 	     
@@ -84,13 +94,14 @@ let binopeval (op: string) (v1: expr) (v2: expr) : expr =
   | "-", Num x1, Num x2 -> Num (x1 - x2)
   | "-", _, _ -> raise (EvalError "can't subtract non-ints")
   | "/", Num x1, Num x2 ->
-    if x2 != 0 then Num (x1 * x2)
-    else raise (EvalError "can't multiply non-ints")
+    if x2 != 0 then Num (x1 / x2)
+    else raise (EvalError "Division by zero")
   | "/", _, _ -> raise (EvalError "can't divide non-ints")
   | "=", Num x1, Num x2 -> Bool (x1 = x2)
   | _, _, _  -> raise (EvalError "can't divide non-ints")
 ;;
 
+(* evaluate using substitution *)
 let rec eval (exp: expr) : expr =
   match exp with
   | Num _ | Bool _ -> exp
@@ -105,13 +116,49 @@ let rec eval (exp: expr) : expr =
   | App (f, q) ->
     match eval f with
     | Fun(def, body) -> eval (subst def (eval q) body)
-    | _ -> exp
+    | _ -> raise (EvalError "only functions can be applied")
+;;
+
+(* evaluate with dynamic scoping *)
+let rec evald exp env =
+  match exp with
+  | Num _ | Bool _ | Fun (_, _) | Raise | Unassigned -> (Env.Val exp)
+  | Var x -> Env.lookup env x
+  | Unop (op, e) -> (match evald e env with
+		 | Env.Val p -> Env.Val (unopeval op p)
+         | _ -> raise EvalException)
+  | Binop (op, e1, e2) -> (match (evald e1 env, evald e2 env) with
+         | Env.Val p1, Env.Val p2 -> Env.Val (binopeval op p1 p2)
+         | _ -> raise EvalException)
+  | Conditional(e1, e2, e3) -> (match evald e1 env with
+         | Env.Val (Bool b) -> (match b with
+                       | true -> evald e2 env
+                       | false -> evald e3 env)
+         | _ -> raise EvalException)
+  | Let(x, def, body) ->
+    (match evald def env with
+     | Env.Val p -> let env' = Env.extend env x (ref (Env.Val p)) in
+          evald body env'
+     | Env.Closure _ -> raise EvalException)
+  | Letrec(x, def, body) ->
+    let env' = Env.extend env x (ref (Env.Val Unassigned)) in
+    (match evald def env' with
+    | Env.Val Unassigned -> raise EvalException
+    | Env.Val p -> let env'' = Env.extend env' x (ref (Env.Val p)) in
+                   evald body env''
+    | Env.Closure _ -> raise EvalException)
+  | App(e1, e2) -> (match evald e1 env with
+    | Env.Val (Fun (s, e1')) -> (match evald e2 env with
+         | Env.Val v -> let env' = Env.extend env s (ref (Env.Val v)) in
+                  evald e1' env'
+         | Env.Closure _ -> raise (EvalError "only functions can be applied"))
+    | _ -> raise  (EvalError "only functions can be applied"))
 ;;
 
 let eval_t exp _env = Env.Val exp ;;
 let eval_s exp _env = Env.Val (eval exp) ;;
-let eval_d _ = failwith "eval_d not implemented" ;;
+let eval_d exp env = evald exp env ;;
 let eval_l _ = failwith "eval_l not implemented" ;;
 
-let evaluate = eval_s ;;
+let evaluate = eval_d ;;
 
