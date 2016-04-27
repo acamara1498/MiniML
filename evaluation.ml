@@ -219,5 +219,5 @@ let eval_s exp _env = Env.Val (eval exp) ;;
 let eval_d exp env = evald exp env ;;
 let eval_l exp env = eval_lex exp env ;;
 
-let evaluate = eval_s ;;
+let evaluate = eval_l ;;
 
